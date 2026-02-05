@@ -1,0 +1,52 @@
+# Render Blueprint for Milk Subscription Platform
+# Deploy both frontend and backend services
+
+services:
+  # Backend API Service
+  - type: web
+    name: milk-subscription-api
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: cd backend && npm install && npx prisma generate && npm run build
+    startCommand: cd backend && npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: DATABASE_URL
+        sync: false  # Set this manually in Render dashboard with your MongoDB Atlas URL
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_EXPIRY
+        value: 15m
+      - key: JWT_REFRESH_EXPIRY
+        value: 7d
+      - key: CORS_ORIGIN
+        value: https://milk-subscription-frontend.onrender.com
+
+  # Frontend Service
+  - type: web
+    name: milk-subscription-frontend
+    env: static
+    region: oregon
+    plan: free
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://milk-subscription-api.onrender.com/api
+
+# Note: Database is handled by MongoDB Atlas (external)
+# Set DATABASE_URL in Render dashboard with your MongoDB Atlas connection string
+# Format: mongodb+srv://<username>:<password>@<cluster>.mongodb.net/<database>?retryWrites=true&w=majority

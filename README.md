@@ -1,6 +1,6 @@
 # Milk Subscription Platform
 
-A full-stack milk subscription management platform built with React, Node.js, Express, and PostgreSQL.
+A full-stack milk subscription management platform built with React, Node.js, Express, and MongoDB.
 
 ## Features
 
@@ -29,7 +29,7 @@ A full-stack milk subscription management platform built with React, Node.js, Ex
 - **Runtime**: Node.js
 - **Framework**: Express.js
 - **Language**: TypeScript
-- **Database**: PostgreSQL
+- **Database**: MongoDB Atlas
 - **ORM**: Prisma
 - **Authentication**: JWT with access/refresh tokens
 - **Validation**: Zod
@@ -97,7 +97,7 @@ milk/
 
 ### Prerequisites
 - Node.js 18 or higher
-- PostgreSQL 14 or higher
+- MongoDB Atlas account (free tier available)
 - npm or yarn
 
 ### Backend Setup
@@ -119,15 +119,15 @@ milk/
 
 4. Configure your environment variables in `.env`:
    ```env
-   DATABASE_URL="postgresql://user:password@localhost:5432/milk_subscription"
-   JWT_ACCESS_SECRET="your-access-secret"
-   JWT_REFRESH_SECRET="your-refresh-secret"
-   PORT=3000
+   DATABASE_URL="mongodb+srv://<username>:<password>@<cluster>.mongodb.net/milk_subscription?retryWrites=true&w=majority"
+   JWT_SECRET="your-jwt-secret"
+   PORT=3001
    ```
 
-5. Run database migrations:
+5. Generate Prisma client and push schema to MongoDB:
    ```bash
-   npx prisma migrate dev
+   npx prisma generate
+   npx prisma db push
    ```
 
 6. Seed the database (optional):

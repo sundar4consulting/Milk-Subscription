@@ -1,12 +1,12 @@
-// Prisma Schema for Milk Subscription Platform
-// Version: 1.0.0
+// Prisma Schema for Milk Subscription Platform - MongoDB
+// Version: 2.0.0
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
@@ -22,12 +22,6 @@ enum UserStatus {
   ACTIVE
   INACTIVE
   SUSPENDED
-}
-
-enum ProductUnit {
-  LITER
-  PACKET
-  BOTTLE
 }
 
 enum SubscriptionFrequency {
@@ -47,9 +41,11 @@ enum SubscriptionStatus {
 
 enum DeliveryStatus {
   SCHEDULED
+  OUT_FOR_DELIVERY
   DELIVERED
   PARTIAL
   MISSED
+  FAILED
   CANCELLED
 }
 
@@ -63,19 +59,14 @@ enum AdhocRequestStatus {
   APPROVED
   PARTIALLY_APPROVED
   REJECTED
+  DELIVERED
   CANCELLED
   EXPIRED
 }
 
-enum AdhocItemStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
 enum BillStatus {
   DRAFT
-  GENERATED
+  PENDING
   SENT
   PAID
   PARTIAL
@@ -90,7 +81,7 @@ enum PaymentMethod {
   NETBANKING
   WALLET
   CASH
-  CHEQUE
+  BANK_TRANSFER
 }
 
 enum PaymentStatus {
@@ -100,72 +91,53 @@ enum PaymentStatus {
   REFUNDED
 }
 
-enum WalletTransactionType {
+enum TransactionType {
   CREDIT
   DEBIT
 }
 
-enum WalletReferenceType {
-  REFUND
-  PAYMENT
-  ADJUSTMENT
-  BONUS
-  MISSED_DELIVERY_CREDIT
-  VACATION_CREDIT
-}
-
 enum NotificationType {
   DELIVERY
+  BILL
   PAYMENT
   SUBSCRIPTION
-  ANNOUNCEMENT
-  ALERT
-  ADHOC_REQUEST
+  VACATION
+  ADHOC
+  SYSTEM
 }
 
 enum NotificationChannel {
-  APP
   EMAIL
   SMS
   PUSH
-}
-
-enum SubscriptionChangeType {
-  CREATED
-  MODIFIED
-  PAUSED
-  RESUMED
-  CANCELLED
+  IN_APP
 }
 
 // ==================== MODELS ====================
 
 model User {
-  id           String     @id @default(uuid())
+  id           String     @id @default(auto()) @map("_id") @db.ObjectId
   email        String     @unique
-  phone        String     @unique
+  phone        String?
   passwordHash String     @map("password_hash")
+  name         String
   role         UserRole   @default(CUSTOMER)
   status       UserStatus @default(ACTIVE)
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
   // Relations
-  customerProfile      CustomerProfile?
-  deliveriesAssigned   Delivery[]           @relation("DeliveryPerson")
-  adhocReviewedBy      AdhocRequest[]       @relation("ReviewedBy")
-  subscriptionChanges  SubscriptionHistory[] @relation("ChangedBy")
-  notifications        Notification[]
-  auditLogs            AuditLog[]
-  refreshTokens        RefreshToken[]
+  customer      Customer?
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
 
   @@map("users")
 }
 
 model RefreshToken {
-  id        String   @id @default(uuid())
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
   token     String   @unique
-  userId    String   @map("user_id")
+  userId    String   @map("user_id") @db.ObjectId
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -174,267 +146,244 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
-model CustomerProfile {
-  id           String   @id @default(uuid())
-  userId       String   @unique @map("user_id")
-  firstName    String   @map("first_name")
-  lastName     String   @map("last_name")
-  profileImage String?  @map("profile_image")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+model Customer {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @unique @map("user_id") @db.ObjectId
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   addresses     Address[]
   subscriptions Subscription[]
   adhocRequests AdhocRequest[]
+  deliveries    Delivery[]
   bills         Bill[]
-  payments      Payment[]
-  wallet        CustomerWallet?
+  wallet        Wallet?
+  notifications Notification[]
 
-  @@map("customer_profiles")
+  @@map("customers")
 }
 
 model Address {
-  id           String   @id @default(uuid())
-  customerId   String   @map("customer_id")
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  customerId   String   @map("customer_id") @db.ObjectId
+  label        String   @default("Home")
   addressLine1 String   @map("address_line1")
   addressLine2 String?  @map("address_line2")
   city         String
   state        String
   postalCode   String   @map("postal_code")
   country      String   @default("India")
-  latitude     Decimal? @db.Decimal(10, 8)
-  longitude    Decimal? @db.Decimal(11, 8)
+  landmark     String?
   isDefault    Boolean  @default(false) @map("is_default")
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   // Relations
-  customer      CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
   subscriptions Subscription[]
   adhocRequests AdhocRequest[]
+  deliveries    Delivery[]
 
   @@map("addresses")
 }
 
 model Product {
-  id           String      @id @default(uuid())
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
   name         String
   description  String?
-  unit         ProductUnit @default(LITER)
-  unitQuantity Decimal     @default(1) @map("unit_quantity") @db.Decimal(10, 2)
-  imageUrl     String?     @map("image_url")
-  isActive     Boolean     @default(true) @map("is_active")
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
+  unit         String   @default("liter")
+  pricePerUnit Float    @map("price_per_unit")
+  category     String   @default("MILK")
+  imageUrl     String?  @map("image_url")
+  minQuantity  Int      @default(1) @map("min_quantity")
+  maxQuantity  Int      @default(10) @map("max_quantity")
+  isAvailable  Boolean  @default(true) @map("is_available")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Embedded pricing history
+  pricingHistory ProductPricing[]
 
   // Relations
-  pricing           ProductPricing[]
-  subscriptions     Subscription[]
-  adhocRequestItems AdhocRequestItem[]
-  billItems         BillItem[]
+  subscriptions Subscription[]
+  adhocItems    AdhocItem[]
+  deliveries    Delivery[]
+  billItems     BillItem[]
 
   @@map("products")
 }
 
-model ProductPricing {
-  id           String    @id @default(uuid())
-  productId    String    @map("product_id")
-  pricePerUnit Decimal   @map("price_per_unit") @db.Decimal(10, 2)
-  effectiveFrom DateTime  @map("effective_from") @db.Date
-  effectiveTo  DateTime? @map("effective_to") @db.Date
-  createdAt    DateTime  @default(now()) @map("created_at")
-
-  // Relations
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
-
-  @@map("product_pricing")
+// Embedded type for product pricing history
+type ProductPricing {
+  price     Float
+  startDate DateTime @map("start_date")
+  endDate   DateTime? @map("end_date")
 }
 
 model Subscription {
-  id                 String              @id @default(uuid())
-  customerId         String              @map("customer_id")
-  productId          String              @map("product_id")
-  addressId          String              @map("address_id")
-  quantity           Decimal             @db.Decimal(10, 2)
-  frequency          SubscriptionFrequency @default(DAILY)
-  customDays         Json?               @map("custom_days") // ["monday", "wednesday", "friday"]
-  startDate          DateTime            @map("start_date") @db.Date
-  endDate            DateTime?           @map("end_date") @db.Date
-  status             SubscriptionStatus  @default(ACTIVE)
-  pauseStartDate     DateTime?           @map("pause_start_date") @db.Date
-  pauseEndDate       DateTime?           @map("pause_end_date") @db.Date
-  cancellationReason String?             @map("cancellation_reason")
-  cancelledAt        DateTime?           @map("cancelled_at")
-  createdAt          DateTime            @default(now()) @map("created_at")
-  updatedAt          DateTime            @updatedAt @map("updated_at")
+  id           String              @id @default(auto()) @map("_id") @db.ObjectId
+  customerId   String              @map("customer_id") @db.ObjectId
+  productId    String              @map("product_id") @db.ObjectId
+  addressId    String              @map("address_id") @db.ObjectId
+  quantity     Float
+  frequency    SubscriptionFrequency @default(DAILY)
+  customDays   Int[]               @default([]) @map("custom_days")
+  deliverySlot String              @default("MORNING") @map("delivery_slot")
+  startDate    DateTime            @map("start_date")
+  endDate      DateTime?           @map("end_date")
+  status       SubscriptionStatus  @default(ACTIVE)
+  pausedFrom   DateTime?           @map("paused_from")
+  pausedTo     DateTime?           @map("paused_to")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+
+  // Embedded history
+  history SubscriptionHistoryItem[]
 
   // Relations
-  customer   CustomerProfile       @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  product    Product               @relation(fields: [productId], references: [id])
-  address    Address               @relation(fields: [addressId], references: [id])
+  customer   Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id])
+  address    Address    @relation(fields: [addressId], references: [id])
   vacations  Vacation[]
   deliveries Delivery[]
-  history    SubscriptionHistory[]
-  billItems  BillItem[]
 
   @@map("subscriptions")
 }
 
-model SubscriptionHistory {
-  id             String               @id @default(uuid())
-  subscriptionId String               @map("subscription_id")
-  changeType     SubscriptionChangeType @map("change_type")
-  previousValues Json?                @map("previous_values")
-  newValues      Json?                @map("new_values")
-  changedBy      String               @map("changed_by")
-  changedAt      DateTime             @default(now()) @map("changed_at")
-
-  // Relations
-  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  changedByUser User        @relation("ChangedBy", fields: [changedBy], references: [id])
-
-  @@map("subscription_history")
+// Embedded type for subscription history
+type SubscriptionHistoryItem {
+  changeType  String
+  oldValue    String?
+  newValue    String?
+  changedAt   DateTime @map("changed_at")
+  changedBy   String?  @map("changed_by")
 }
 
 model Vacation {
-  id             String   @id @default(uuid())
-  subscriptionId String   @map("subscription_id")
-  startDate      DateTime @map("start_date") @db.Date
-  endDate        DateTime @map("end_date") @db.Date
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  subscriptionId String   @map("subscription_id") @db.ObjectId
+  startDate      DateTime @map("start_date")
+  endDate        DateTime @map("end_date")
   reason         String?
   createdAt      DateTime @default(now()) @map("created_at")
 
-  // Relations
   subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
 
   @@map("vacations")
 }
 
 model Holiday {
-  id          String   @id @default(uuid())
-  date        DateTime @unique @db.Date
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  date        DateTime @unique
   name        String
   description String?
+  isRecurring Boolean  @default(false) @map("is_recurring")
   createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@map("holidays")
 }
 
 model Delivery {
-  id               String         @id @default(uuid())
-  subscriptionId   String?        @map("subscription_id")
-  adhocRequestId   String?        @map("adhoc_request_id")
-  adhocItemId      String?        @map("adhoc_item_id")
-  deliveryType     DeliveryType   @default(REGULAR) @map("delivery_type")
-  deliveryDate     DateTime       @map("delivery_date") @db.Date
-  scheduledQuantity Decimal       @map("scheduled_quantity") @db.Decimal(10, 2)
-  deliveredQuantity Decimal?      @map("delivered_quantity") @db.Decimal(10, 2)
-  status           DeliveryStatus @default(SCHEDULED)
-  deliveryTime     DateTime?      @map("delivery_time")
-  deliveryPersonId String?        @map("delivery_person_id")
-  notes            String?
-  issueReported    Boolean        @default(false) @map("issue_reported")
-  issueDescription String?        @map("issue_description")
-  createdAt        DateTime       @default(now()) @map("created_at")
-  updatedAt        DateTime       @updatedAt @map("updated_at")
+  id             String         @id @default(auto()) @map("_id") @db.ObjectId
+  customerId     String         @map("customer_id") @db.ObjectId
+  subscriptionId String?        @map("subscription_id") @db.ObjectId
+  adhocRequestId String?        @unique @map("adhoc_request_id") @db.ObjectId
+  productId      String?        @map("product_id") @db.ObjectId
+  addressId      String         @map("address_id") @db.ObjectId
+  deliveryType   DeliveryType   @default(REGULAR) @map("delivery_type")
+  deliveryDate   DateTime       @map("delivery_date")
+  deliverySlot   String         @default("MORNING") @map("delivery_slot")
+  quantity       Float
+  pricePerUnit   Float          @map("price_per_unit")
+  totalAmount    Float          @map("total_amount")
+  status         DeliveryStatus @default(SCHEDULED)
+  deliveredAt    DateTime?      @map("delivered_at")
+  notes          String?
+  issueReported  String?        @map("issue_reported")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
 
   // Relations
-  subscription   Subscription?     @relation(fields: [subscriptionId], references: [id])
-  adhocRequest   AdhocRequest?     @relation(fields: [adhocRequestId], references: [id])
-  adhocItem      AdhocRequestItem? @relation(fields: [adhocItemId], references: [id])
-  deliveryPerson User?             @relation("DeliveryPerson", fields: [deliveryPersonId], references: [id])
+  customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+  adhocRequest AdhocRequest? @relation(fields: [adhocRequestId], references: [id])
+  product      Product?      @relation(fields: [productId], references: [id])
+  address      Address       @relation(fields: [addressId], references: [id])
 
-  @@unique([subscriptionId, deliveryDate], name: "unique_subscription_delivery")
+  @@index([deliveryDate, status])
   @@map("deliveries")
 }
 
 model AdhocRequest {
-  id                 String             @id @default(uuid())
-  customerId         String             @map("customer_id")
-  addressId          String             @map("address_id")
-  requestNumber      String             @unique @map("request_number")
-  status             AdhocRequestStatus @default(PENDING)
-  totalEstimatedCost Decimal            @map("total_estimated_cost") @db.Decimal(10, 2)
-  notes              String?            // Customer notes
-  adminNotes         String?            @map("admin_notes")
-  reviewedBy         String?            @map("reviewed_by")
-  reviewedAt         DateTime?          @map("reviewed_at")
-  createdAt          DateTime           @default(now()) @map("created_at")
-  updatedAt          DateTime           @updatedAt @map("updated_at")
+  id              String             @id @default(auto()) @map("_id") @db.ObjectId
+  customerId      String             @map("customer_id") @db.ObjectId
+  addressId       String             @map("address_id") @db.ObjectId
+  deliveryDate    DateTime           @map("delivery_date")
+  deliverySlot    String             @default("MORNING") @map("delivery_slot")
+  status          AdhocRequestStatus @default(PENDING)
+  totalAmount     Float              @default(0) @map("total_amount")
+  notes           String?
+  adminNotes      String?            @map("admin_notes")
+  rejectionReason String?            @map("rejection_reason")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
 
   // Relations
-  customer      CustomerProfile    @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  address       Address            @relation(fields: [addressId], references: [id])
-  reviewedByUser User?             @relation("ReviewedBy", fields: [reviewedBy], references: [id])
-  items         AdhocRequestItem[]
-  deliveries    Delivery[]
+  customer Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  address  Address     @relation(fields: [addressId], references: [id])
+  items    AdhocItem[]
+  delivery Delivery?
 
   @@map("adhoc_requests")
 }
 
-model AdhocRequestItem {
-  id              String          @id @default(uuid())
-  adhocRequestId  String          @map("adhoc_request_id")
-  productId       String          @map("product_id")
-  requestedDate   DateTime        @map("requested_date") @db.Date
-  quantity        Decimal         @db.Decimal(10, 2)
-  unitPrice       Decimal         @map("unit_price") @db.Decimal(10, 2)
-  estimatedCost   Decimal         @map("estimated_cost") @db.Decimal(10, 2)
-  status          AdhocItemStatus @default(PENDING)
-  rejectionReason String?         @map("rejection_reason")
-  createdAt       DateTime        @default(now()) @map("created_at")
+model AdhocItem {
+  id             String  @id @default(auto()) @map("_id") @db.ObjectId
+  adhocRequestId String  @map("adhoc_request_id") @db.ObjectId
+  productId      String  @map("product_id") @db.ObjectId
+  quantity       Float
+  approvedQty    Float?  @map("approved_qty")
+  pricePerUnit   Float   @map("price_per_unit")
+  status         String  @default("PENDING")
 
-  // Relations
   adhocRequest AdhocRequest @relation(fields: [adhocRequestId], references: [id], onDelete: Cascade)
   product      Product      @relation(fields: [productId], references: [id])
-  deliveries   Delivery[]
 
-  @@unique([adhocRequestId, productId, requestedDate], name: "unique_adhoc_item")
-  @@map("adhoc_request_items")
+  @@map("adhoc_items")
 }
 
 model AdhocCapacity {
-  id               String   @id @default(uuid())
-  date             DateTime @unique @db.Date
-  maxAdhocRequests Int      @default(50) @map("max_adhoc_requests")
-  currentApproved  Int      @default(0) @map("current_approved")
-  isBlocked        Boolean  @default(false) @map("is_blocked")
-  blockReason      String?  @map("block_reason")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  date         DateTime @unique
+  deliverySlot String   @map("delivery_slot")
+  maxOrders    Int      @map("max_orders")
+  currentCount Int      @default(0) @map("current_count")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
+  @@unique([date, deliverySlot])
   @@map("adhoc_capacity")
 }
 
 model Bill {
-  id                      String     @id @default(uuid())
-  customerId              String     @map("customer_id")
-  billNumber              String     @unique @map("bill_number")
-  billingPeriodStart      DateTime   @map("billing_period_start") @db.Date
-  billingPeriodEnd        DateTime   @map("billing_period_end") @db.Date
-  totalScheduledDeliveries Int       @map("total_scheduled_deliveries")
-  actualDeliveries        Int        @map("actual_deliveries")
-  vacationDays            Int        @map("vacation_days")
-  missedDeliveries        Int        @map("missed_deliveries")
-  holidayDays             Int        @map("holiday_days")
-  adhocDeliveries         Int        @default(0) @map("adhoc_deliveries")
-  adhocAmount             Decimal    @default(0) @map("adhoc_amount") @db.Decimal(10, 2)
-  regularSubtotal         Decimal    @map("regular_subtotal") @db.Decimal(10, 2)
-  subtotal                Decimal    @db.Decimal(10, 2)
-  taxAmount               Decimal    @default(0) @map("tax_amount") @db.Decimal(10, 2)
-  discountAmount          Decimal    @default(0) @map("discount_amount") @db.Decimal(10, 2)
-  creditsApplied          Decimal    @default(0) @map("credits_applied") @db.Decimal(10, 2)
-  totalAmount             Decimal    @map("total_amount") @db.Decimal(10, 2)
-  dueDate                 DateTime   @map("due_date") @db.Date
-  status                  BillStatus @default(DRAFT)
-  generatedAt             DateTime?  @map("generated_at")
-  createdAt               DateTime   @default(now()) @map("created_at")
-  updatedAt               DateTime   @updatedAt @map("updated_at")
+  id          String     @id @default(auto()) @map("_id") @db.ObjectId
+  customerId  String     @map("customer_id") @db.ObjectId
+  billNumber  String     @unique @map("bill_number")
+  periodStart DateTime   @map("period_start")
+  periodEnd   DateTime   @map("period_end")
+  totalAmount Float      @map("total_amount")
+  paidAmount  Float      @default(0) @map("paid_amount")
+  status      BillStatus @default(PENDING)
+  dueDate     DateTime   @map("due_date")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
 
   // Relations
-  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
   items    BillItem[]
   payments Payment[]
 
@@ -442,114 +391,105 @@ model Bill {
 }
 
 model BillItem {
-  id             String   @id @default(uuid())
-  billId         String   @map("bill_id")
-  subscriptionId String?  @map("subscription_id")
-  productId      String   @map("product_id")
-  description    String
-  quantity       Decimal  @db.Decimal(10, 2)
-  unitPrice      Decimal  @map("unit_price") @db.Decimal(10, 2)
-  totalPrice     Decimal  @map("total_price") @db.Decimal(10, 2)
-  itemType       DeliveryType @default(REGULAR) @map("item_type")
-  createdAt      DateTime @default(now()) @map("created_at")
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  billId      String   @map("bill_id") @db.ObjectId
+  productId   String?  @map("product_id") @db.ObjectId
+  description String
+  quantity    Float
+  unitPrice   Float    @map("unit_price")
+  totalPrice  Float    @map("total_price")
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  // Relations
-  bill         Bill          @relation(fields: [billId], references: [id], onDelete: Cascade)
-  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
-  product      Product       @relation(fields: [productId], references: [id])
+  bill    Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id])
 
   @@map("bill_items")
 }
 
 model Payment {
-  id             String        @id @default(uuid())
-  billId         String        @map("bill_id")
-  customerId     String        @map("customer_id")
-  amount         Decimal       @db.Decimal(10, 2)
-  paymentMethod  PaymentMethod @map("payment_method")
-  paymentGateway String?       @map("payment_gateway")
-  transactionId  String?       @map("transaction_id")
-  status         PaymentStatus @default(PENDING)
-  paymentDate    DateTime?     @map("payment_date")
-  notes          String?
-  createdAt      DateTime      @default(now()) @map("created_at")
-  updatedAt      DateTime      @updatedAt @map("updated_at")
+  id            String        @id @default(auto()) @map("_id") @db.ObjectId
+  billId        String        @map("bill_id") @db.ObjectId
+  amount        Float
+  method        PaymentMethod
+  transactionId String?       @map("transaction_id")
+  status        PaymentStatus @default(PENDING)
+  notes         String?
+  paidAt        DateTime?     @map("paid_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
 
-  // Relations
-  bill     Bill            @relation(fields: [billId], references: [id])
-  customer CustomerProfile @relation(fields: [customerId], references: [id])
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
 
   @@map("payments")
 }
 
-model CustomerWallet {
-  id         String   @id @default(uuid())
-  customerId String   @unique @map("customer_id")
-  balance    Decimal  @default(0) @db.Decimal(10, 2)
+model Wallet {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  customerId String   @unique @map("customer_id") @db.ObjectId
+  balance    Float    @default(0)
   updatedAt  DateTime @updatedAt @map("updated_at")
 
-  // Relations
-  customer     CustomerProfile     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer     Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
   transactions WalletTransaction[]
 
-  @@map("customer_wallets")
+  @@map("wallets")
 }
 
 model WalletTransaction {
-  id            String                @id @default(uuid())
-  walletId      String                @map("wallet_id")
-  type          WalletTransactionType
-  amount        Decimal               @db.Decimal(10, 2)
-  referenceType WalletReferenceType   @map("reference_type")
-  referenceId   String?               @map("reference_id")
-  description   String?
-  createdAt     DateTime              @default(now()) @map("created_at")
+  id          String          @id @default(auto()) @map("_id") @db.ObjectId
+  walletId    String          @map("wallet_id") @db.ObjectId
+  type        TransactionType
+  amount      Float
+  description String
+  reference   String?
+  referenceId String?         @map("reference_id")
+  createdAt   DateTime        @default(now()) @map("created_at")
 
-  // Relations
-  wallet CustomerWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
   @@map("wallet_transactions")
 }
 
 model Notification {
-  id        String              @id @default(uuid())
-  userId    String              @map("user_id")
-  title     String
-  message   String
-  type      NotificationType
-  isRead    Boolean             @default(false) @map("is_read")
-  sentVia   NotificationChannel @map("sent_via")
-  metadata  Json?
-  createdAt DateTime            @default(now()) @map("created_at")
+  id         String              @id @default(auto()) @map("_id") @db.ObjectId
+  customerId String              @map("customer_id") @db.ObjectId
+  type       NotificationType
+  channel    NotificationChannel @default(IN_APP)
+  title      String
+  message    String
+  isRead     Boolean             @default(false) @map("is_read")
+  metadata   Json?
+  createdAt  DateTime            @default(now()) @map("created_at")
 
-  // Relations
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
+  @@index([customerId, isRead])
   @@map("notifications")
 }
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  userId     String?  @map("user_id")
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String?  @map("user_id") @db.ObjectId
   action     String
   entityType String   @map("entity_type")
-  entityId   String?  @map("entity_id")
-  oldValues  Json?    @map("old_values")
-  newValues  Json?    @map("new_values")
+  entityId   String   @map("entity_id")
+  oldValue   Json?    @map("old_value")
+  newValue   Json?    @map("new_value")
   ipAddress  String?  @map("ip_address")
   userAgent  String?  @map("user_agent")
   createdAt  DateTime @default(now()) @map("created_at")
 
-  // Relations
   user User? @relation(fields: [userId], references: [id])
 
+  @@index([entityType, entityId])
   @@map("audit_logs")
 }
 
-model SystemSettings {
-  id        String   @id @default(uuid())
+model SystemSetting {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
   key       String   @unique
-  value     Json
+  value     String
+  type      String   @default("string")
+  category  String   @default("general")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
